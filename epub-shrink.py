@@ -36,7 +36,8 @@ def adjust_image_resize_percent(percent):
     return percent / 100.0 if percent else None
 
 def process_epub_files(in_path, out_path, args):
-    with zipfile.ZipFile(in_path, 'r') as in_book, zipfile.ZipFile(out_path, 'w') as out_book:
+    with zipfile.ZipFile(in_path, 'r') as in_book, \
+            zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as out_book:
         for item in in_book.namelist():
             with in_book.open(item) as in_file:
                 content = in_file.read()
@@ -75,6 +76,14 @@ def save_image_to_buffer(img, format_, params):
     img.save(buffer, format=format_, **params)
     return buffer.getvalue()
 
+def report_file_sizes(in_path, out_path):
+    in_size = os.path.getsize(in_path)
+    out_size = os.path.getsize(out_path)
+    reduction_percent = (1 - (out_size / in_size)) * 100
+    print(f"Original file size: {in_size} bytes")
+    print(f"Output file size: {out_size} bytes")
+    print(f"Reduction in file size: {reduction_percent:.2f}%")
+
 def main():
     args = parse_arguments()
     configure_logging(args.log_level)
@@ -82,6 +91,7 @@ def main():
     if args.image_resize_percent:
         args.image_resize_percent = adjust_image_resize_percent(args.image_resize_percent)
     process_epub_files(args.in_epub_filepath, out_path, args)
+    report_file_sizes(args.in_epub_filepath, out_path)
 
 if __name__ == '__main__':
     main()
