@@ -4,103 +4,84 @@ import io
 import logging
 import zipfile
 import mimetypes
-
 from PIL import Image
 
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('in_epub_filepath', help='Input EPUB file path')
+    parser.add_argument('out_epub_filepath', help='Output EPUB file path')
+    parser.add_argument('-l', '--log-level', help='Set the logging level')
+    parser.add_argument('--jpeg-quality', type=int, default=75, help='JPEG compression quality')
+    parser.add_argument('--image-resize-percent', type=int, help='Percentage to resize images')
+    parser.add_argument('--image-resize-resample', help='Resampling method when resizing images')
+    return parser.parse_args()
+
+def configure_logging(level):
+    if level:
+        log_level = getattr(logging, level.upper(), None)
+        if not isinstance(log_level, int):
+            raise ValueError(f'Invalid log level: {level}')
+        logging.basicConfig(level=log_level)
+
+def validate_file_paths(in_path, out_path):
+    if not os.path.isfile(in_path):
+        raise FileNotFoundError(in_path)
+    if os.path.isdir(out_path):
+        return os.path.join(out_path, os.path.basename(in_path))
+    if out_path == in_path:
+        raise FileExistsError(out_path)
+    return out_path
+
+def adjust_image_resize_percent(percent):
+    return percent / 100.0 if percent else None
+
+def process_epub_files(in_path, out_path, args):
+    with zipfile.ZipFile(in_path, 'r') as in_book, zipfile.ZipFile(out_path, 'w') as out_book:
+        for item in in_book.namelist():
+            with in_book.open(item) as in_file:
+                content = in_file.read()
+                mime_type, _ = mimetypes.guess_type(item)
+                if mime_type and mime_type.startswith('image/'):
+                    _, subtype = mime_type.split('/')
+                    content = compress_and_resize_image(content, subtype, args)
+                out_book.writestr(item, content)
+
+def compress_and_resize_image(content, subtype, args):
+    if subtype not in {'jpeg', 'jpg', 'png'}:
+        return content
+
+    img = Image.open(io.BytesIO(content))
+    if args.image_resize_percent:
+        img = resize_image(img, args.image_resize_percent, args.image_resize_resample)
+
+    format_, params = determine_image_format_and_params(subtype, args)
+    return save_image_to_buffer(img, format_, params)
+
+def resize_image(img, resize_percent, resample_method):
+    new_size = [int(dimension * resize_percent) for dimension in img.size]
+    resample = getattr(Image, resample_method.upper(), None) if resample_method else None
+    logging.info(f'Resizing image from {img.size} to {new_size}')
+    return img.resize(new_size, resample)
+
+def determine_image_format_and_params(subtype, args):
+    params = {'optimize': True}
+    if subtype in {'jpeg', 'jpg'}:
+        return 'JPEG', {**params, 'quality': args.jpeg_quality}
+    elif subtype == 'png':
+        return 'PNG', params
+
+def save_image_to_buffer(img, format_, params):
+    buffer = io.BytesIO()
+    img.save(buffer, format=format_, **params)
+    return buffer.getvalue()
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('in_epub_filepath')
-    parser.add_argument('out_epub_filepath')
-    parser.add_argument('-l', '--log-level')
-    parser.add_argument('--jpeg-quality', type=int, default=75)
-    parser.add_argument('--image-resize-percent', type=int)
-    parser.add_argument('--image-resize-resample')
-
-    args = parser.parse_args()
-
-    if args.log_level:
-        log_level_num = getattr(logging, args.log_level.upper(), None)
-        if type(log_level_num) is not int:
-            raise ValueError('Invalid log level: {}'.format(args.log_level))
-
-        logging.basicConfig(level=log_level_num)
-
-    if not os.path.isfile(args.in_epub_filepath):
-        raise FileNotFoundError(args.in_epub_filepath)
-
-    if os.path.isdir(args.out_epub_filepath):
-        args.out_epub_filepath = os.path.join(
-            args.out_epub_filepath, os.path.basename(args.in_epub_filepath))
-
-    if args.out_epub_filepath == args.in_epub_filepath:
-        raise FileExistsError(args.out_epub_filepath)
-
+    args = parse_arguments()
+    configure_logging(args.log_level)
+    out_path = validate_file_paths(args.in_epub_filepath, args.out_epub_filepath)
     if args.image_resize_percent:
-        args.image_resize_percent /= 100.0
-
-    with zipfile.ZipFile(args.in_epub_filepath, 'r') as in_book:
-        with zipfile.ZipFile(args.out_epub_filepath, 'w') as out_book:
-            for name in in_book.namelist():
-                with in_book.open(name, 'r') as in_file:
-                    content = in_file.read()
-
-                    type_, encoding = mimetypes.guess_type(name)
-
-                    if type_:
-                        type_, subtype = type_.split('/')
-
-                        if type_ == 'image':
-                            content = _compress_image(subtype, content, args)
-
-                    out_book.writestr(name, content)
-
-
-def _compress_image(subtype, old_content, args):
-    if subtype not in {'jpeg', 'jpg', 'png'}:
-        return old_content
-
-    in_buffer = io.BytesIO(old_content)
-    img = Image.open(in_buffer)
-
-    if args.image_resize_percent:
-        original_size = img.size
-        new_size = (int(original_size[0] * args.image_resize_percent),
-                    int(original_size[1] * args.image_resize_percent))
-        logging.info('old size: %s', original_size)
-        logging.info('new size: %s', new_size)
-
-        resample = None
-        if args.image_resize_resample:
-            resample_attr = args.image_resize_resample.upper()
-            if not hasattr(Image, resample_attr):
-                raise ValueError('unknown resample mode: {}'.format(
-                    args.image_resize_resample))
-
-            resample = getattr(Image, resample_attr)
-
-        img = img.resize(new_size, resample)
-
-    format_ = None
-    params = {}
-    if subtype == 'jpeg' or subtype == 'jpg':
-        format_ = 'JPEG'
-        params['quality'] = args.jpeg_quality
-        params['optimize'] = True
-    elif subtype == 'png':
-        format_ = 'PNG'
-        params['optimize'] = True
-
-    out_buffer = io.BytesIO()
-    img.save(out_buffer, format_, **params)
-
-    new_content = out_buffer.getvalue()
-
-    logging.info('old content length: %s', len(old_content))
-    logging.info('new content length: %s', len(new_content))
-
-    return new_content
-
+        args.image_resize_percent = adjust_image_resize_percent(args.image_resize_percent)
+    process_epub_files(args.in_epub_filepath, out_path, args)
 
 if __name__ == '__main__':
     main()
