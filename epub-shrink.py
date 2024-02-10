@@ -14,6 +14,7 @@ def parse_arguments():
     parser.add_argument('--jpeg-quality', type=int, default=75, help='JPEG compression quality')
     parser.add_argument('--image-resize-percent', type=int, help='Percentage to resize images')
     parser.add_argument('--image-resize-resample', help='Resampling method when resizing images')
+    parser.add_argument('--grayscale', action='store_true', help='Make images grayscale')
     return parser.parse_args()
 
 def configure_logging(level):
@@ -54,7 +55,8 @@ def compress_and_resize_image(content, subtype, args):
     img = Image.open(io.BytesIO(content))
     if args.image_resize_percent:
         img = resize_image(img, args.image_resize_percent, args.image_resize_resample)
-
+    if args.grayscale:
+        img = img.convert('L')
     format_, params = determine_image_format_and_params(subtype, args)
     return save_image_to_buffer(img, format_, params)
 
