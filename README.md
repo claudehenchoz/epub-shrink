@@ -5,7 +5,7 @@ epub-shrink is a Python tool designed to reduce the size of EPUB files. It achie
 ## Features
 
 - **Image Compression:** Reduces the file size of images within the EPUB without significantly compromising quality.
-- **Image Resizing:** Option to resize images based on a percentage of the original size.
+- **Image Resizing:** Option to resize images based on a percentage of the original size or a maximum width.
 - **Grayscale Conversion:** Can convert images to grayscale to further reduce size.
 - **ZIP Compression:** Ensures that the output EPUB file is compressed to the smallest possible size.
 
@@ -30,6 +30,7 @@ python epub-shrink.py <input_epub_filepath> <output_epub_filepath> [options]
 - `-l`, `--log-level`: Set the logging level (e.g., INFO, DEBUG).
 - `--jpeg-quality`: JPEG compression quality (default is 75).
 - `--image-resize-percent`: Percentage to resize images (e.g., 50 for 50%).
+- `--image-resize-maxwidth`: Resize images to a maximum with (in pixels)
 - `--image-resize-resample`: Resampling method when resizing images (e.g., BILINEAR, NEAREST).
 - `--grayscale`: Convert images to grayscale.
 
