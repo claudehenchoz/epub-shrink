@@ -5,6 +5,10 @@ import logging
 import zipfile
 import mimetypes
 from PIL import Image
+import pandas as pd
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -38,6 +42,7 @@ def adjust_image_resize_percent(percent):
     return percent / 100.0 if percent else None
 
 def process_epub_files(in_path, out_path, args):
+    df = pd.DataFrame(columns=['filename', 'in_size', 'out_size'])
     with zipfile.ZipFile(in_path, 'r') as in_book, \
             zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as out_book:
         for item in in_book.namelist():
@@ -48,6 +53,14 @@ def process_epub_files(in_path, out_path, args):
                     _, subtype = mime_type.split('/')
                     content = compress_and_resize_image(content, subtype, args)
                 out_book.writestr(item, content)
+            row = {
+                'filename': in_book.getinfo(item).filename, 
+                'in_size':  in_book.getinfo(item).compress_size, 
+                'out_size': out_book.getinfo(item).compress_size
+            }
+            row_df = pd.DataFrame(row, index=[0])
+            df = pd.concat([df, row_df], ignore_index=True)
+    return df
 
 def compress_and_resize_image(content, subtype, args):
     if subtype not in {'jpeg', 'jpg', 'png'}:
@@ -86,13 +99,79 @@ def save_image_to_buffer(img, format_, params):
     img.save(buffer, format=format_, **params)
     return buffer.getvalue()
 
-def report_file_sizes(in_path, out_path):
-    in_size = os.path.getsize(in_path)
-    out_size = os.path.getsize(out_path)
-    reduction_percent = (1 - (out_size / in_size)) * 100
-    print(f"Original file size: {in_size} bytes")
-    print(f"Output file size: {out_size} bytes")
-    print(f"Reduction in file size: {reduction_percent:.2f}%")
+def format_bytes(size):
+    is_negative = size < 0
+    size = abs(float(size))
+    suffixes = [' b', 'KB', 'MB']
+    i = 0
+    while size >= 1024 and i < len(suffixes)-1:
+        size /= 1024.0
+        i += 1
+    formatted_size = "{:.2f} {}".format(size, suffixes[i])
+    if is_negative:
+        formatted_size = "-" + formatted_size
+    return formatted_size
+
+def report_file_sizes(df, args):
+    df['filetype'] = df['filename'].apply(lambda x: os.path.splitext(x)[1][1:])
+    totals_per_filetype = df.groupby('filetype')[['in_size', 'out_size']].sum().reset_index()
+    totals_per_filetype['size_diff'] = totals_per_filetype['out_size'] - totals_per_filetype['in_size']
+    
+    totals_per_filetype['percent_diff'] = (totals_per_filetype['size_diff'] / totals_per_filetype['in_size']) * 100
+    totals_per_filetype_sorted = totals_per_filetype.sort_values(by='percent_diff', ascending=True, ignore_index=True)
+
+    # Create a console object
+    console = Console()
+
+    console.print("")
+    console.print("epub-shrink")
+    console.print("-----------")
+    console.print("")
+    console.print(f" Input  EPUB: {args.in_epub_filepath}")
+    console.print(f" Output EPUB: {args.out_epub_filepath}", style="bold")
+
+    # Create a table
+    table = Table(show_header=True)
+    table.add_column("Filetype", width=12)
+    table.add_column("In Size", justify="right")
+    table.add_column("Out Size", justify="right")
+    table.add_column("Size Diff", justify="right")
+    table.add_column("Percent Diff", justify="right")
+
+    # Fill the table with data from the DataFrame
+    for index, row in totals_per_filetype_sorted.iterrows():
+        table.add_row(
+            row['filetype'],
+            str(format_bytes(row['in_size'])),
+            str(format_bytes(row['out_size'])),
+            str(format_bytes(row['size_diff'])),
+            f"{row['percent_diff']:.2f}%"
+        )
+
+    table.add_row(end_section=True)
+
+    total_percentage = totals_per_filetype_sorted['size_diff'].sum() / totals_per_filetype_sorted['in_size'].sum() * 100
+    formatted_total_percentage = f"{total_percentage:.2f}%"
+
+    table.add_row(
+        'Total',
+        str(format_bytes(totals_per_filetype_sorted['in_size'].sum())),
+        str(format_bytes(totals_per_filetype_sorted['out_size'].sum())),
+        str(format_bytes(totals_per_filetype_sorted['size_diff'].sum())),
+        formatted_total_percentage, style="bold"
+    )
+
+    for box_style in [
+            box.SQUARE,
+            box.MINIMAL,
+            box.SIMPLE,
+            box.SIMPLE_HEAD,
+        ]:
+        table.box = box_style
+    table.pad_edge = False
+
+    # Print the table
+    console.print(table)
 
 def main():
     args = parse_arguments()
@@ -100,8 +179,8 @@ def main():
     out_path = validate_file_paths(args.in_epub_filepath, args.out_epub_filepath)
     if args.image_resize_percent:
         args.image_resize_percent = adjust_image_resize_percent(args.image_resize_percent)
-    process_epub_files(args.in_epub_filepath, out_path, args)
-    report_file_sizes(args.in_epub_filepath, out_path)
+    report_data = process_epub_files(args.in_epub_filepath, out_path, args)
+    report_file_sizes(report_data, args)
 
 if __name__ == '__main__':
     main()

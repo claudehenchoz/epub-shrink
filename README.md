@@ -13,6 +13,8 @@ epub-shrink is a Python tool designed to reduce the size of EPUB files. It achie
 
 - Python 3.x
 - Pillow library for image processing (install with `pip install Pillow`)
+- Pandas for calculations (install with `pip install pandas`)
+- Rich for table display (install with `pip install rich`)
 
 ## Usage
 
